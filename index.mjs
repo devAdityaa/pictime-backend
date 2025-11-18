@@ -3,11 +3,14 @@ import express from "express";
 import cors from "cors";
 import multer from "multer";
 import { bucket, BUCKET_NAME } from "./lib/storage.js"; // IMPORTANT: use this only
+import dotenv from "dotenv";
+dotenv.config();
 
 const upload = multer();
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+
 const AUTH_TOKEN =
   process.env.BACKEND_AUTH_TOKEN || process.env.AUTH_TOKEN || null;
 
@@ -180,6 +183,64 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     res.json({ ok: true, uploaded: true, objectPath });
   } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// --- SIGNED URL ENDPOINT ---
+app.post("/api/get-upload-url", async (req, res) => {
+  if (!checkAuth(req, res)) return;
+
+  try {
+    const { filename, albumName, projectId, domain } = req.body;
+
+    if (!filename || !albumName || !projectId || !domain) {
+      return res.status(400).json({ ok: false, error: "Missing fields" });
+    }
+
+    const safeAlbum = albumName.toLowerCase().replace(/\s+/g, "-");
+    const albumPath = `${domain}/${safeAlbum}_${projectId}`;
+    const objectPath = `${albumPath}/images/${filename}`;
+    const file = bucket.file(objectPath);
+
+    // 👇 1) check if already exists
+    const [exists] = await file.exists();
+
+    if (exists) {
+      // we *could* update some basic metadata here if you want:
+      await file.setMetadata({
+        metadata: {
+          originalName: filename,
+          lastCheckedAt: new Date().toISOString()
+        }
+      });
+
+      return res.json({
+        ok: true,
+        skipped: true,
+        objectPath
+      });
+    }
+
+    // 👇 2) if NOT exists, create signed URL
+    const options = {
+      version: "v4",
+      action: "write",
+      expires: Date.now() + 10 * 60 * 1000,
+      contentType: "application/octet-stream"
+    };
+
+    const [uploadUrl] = await file.getSignedUrl(options);
+
+    res.json({
+      ok: true,
+      skipped: false,
+      uploadUrl,
+      objectPath
+    });
+
+  } catch (err) {
+    console.error("Signed URL error:", err);
     res.status(500).json({ ok: false, error: String(err) });
   }
 });
