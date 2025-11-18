@@ -82,14 +82,22 @@ app.get("/", (req, res) => {
 // -----------------------------
 // CREATE ALBUM
 // -----------------------------
+// -----------------------------
+// CREATE ALBUM
+// -----------------------------
 app.post("/api/create-album", async (req, res) => {
   if (!checkAuth(req, res)) return;
 
-  const { projectId, albumName, fullMetadata, photos } = req.body;
+  const { projectId, albumName, fullMetadata, photos, domain } = req.body;
 
   try {
     const safeAlbumName = albumName.toLowerCase().replace(/\s+/g, "-");
-    const albumPath = `${safeAlbumName}_${projectId}`;
+    const safeDomain = (domain || "unknown")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-");
+
+    // NEW: domain/album_projectId
+    const albumPath = `${safeDomain}/${safeAlbumName}_${projectId}`;
     const nowIso = new Date().toISOString();
 
     const summaryMetadata = {
@@ -167,7 +175,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       });
       return res.json({ ok: true, skipped: true, objectPath });
     }
-
+//custom meta data
     await fileRef.save(req.file.buffer, {
       resumable: false,
       metadata: {
@@ -187,6 +195,45 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
+
+// --- SET IMAGE METADATA AFTER SIGNED-URL UPLOAD ---
+app.post("/api/set-image-metadata", async (req, res) => {
+  if (!checkAuth(req, res)) return;
+
+  try {
+    const { filename, albumName, projectId, scene, photoId, domain } = req.body;
+
+    if (!filename || !albumName || !projectId || !domain) {
+      return res.status(400).json({ ok: false, error: "Missing fields" });
+    }
+
+    const safeAlbum = albumName.toLowerCase().replace(/\s+/g, "-");
+    const safeDomain = (domain || "unknown")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-");
+
+    const albumPath = `${safeDomain}/${safeAlbum}_${projectId}`;
+    const objectPath = `${albumPath}/images/${filename}`;
+    const fileRef = bucket.file(objectPath);
+
+    const nowIso = new Date().toISOString();
+
+    await fileRef.setMetadata({
+      metadata: {
+        scene: scene || "",
+        photoId: photoId || "",
+        originalName: filename,
+        uploadedAt: nowIso,
+      },
+    });
+
+    res.json({ ok: true, objectPath });
+  } catch (err) {
+    console.error("Metadata update error:", err);
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 // --- SIGNED URL ENDPOINT ---
 app.post("/api/get-upload-url", async (req, res) => {
   if (!checkAuth(req, res)) return;
@@ -199,35 +246,36 @@ app.post("/api/get-upload-url", async (req, res) => {
     }
 
     const safeAlbum = albumName.toLowerCase().replace(/\s+/g, "-");
-    const albumPath = `${domain}/${safeAlbum}_${projectId}`;
+    const safeDomain = (domain || "unknown")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-");
+
+    const albumPath = `${safeDomain}/${safeAlbum}_${projectId}`;
     const objectPath = `${albumPath}/images/${filename}`;
     const file = bucket.file(objectPath);
 
-    // 👇 1) check if already exists
     const [exists] = await file.exists();
 
     if (exists) {
-      // we *could* update some basic metadata here if you want:
       await file.setMetadata({
         metadata: {
           originalName: filename,
-          lastCheckedAt: new Date().toISOString()
-        }
+          lastCheckedAt: new Date().toISOString(),
+        },
       });
 
       return res.json({
         ok: true,
         skipped: true,
-        objectPath
+        objectPath,
       });
     }
 
-    // 👇 2) if NOT exists, create signed URL
     const options = {
       version: "v4",
       action: "write",
       expires: Date.now() + 10 * 60 * 1000,
-      contentType: "application/octet-stream"
+      contentType: "application/octet-stream",
     };
 
     const [uploadUrl] = await file.getSignedUrl(options);
@@ -236,9 +284,8 @@ app.post("/api/get-upload-url", async (req, res) => {
       ok: true,
       skipped: false,
       uploadUrl,
-      objectPath
+      objectPath,
     });
-
   } catch (err) {
     console.error("Signed URL error:", err);
     res.status(500).json({ ok: false, error: String(err) });
