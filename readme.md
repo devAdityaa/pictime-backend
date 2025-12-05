@@ -12,8 +12,7 @@ Before you begin, make sure you have:
 -   A Google account
 
 -   The **Google Cloud SDK (gcloud CLI)** installed\
-    > [[https://cloud.google.com/sdk/docs/install\
-    > ]{.underline}](https://cloud.google.com/sdk/docs/install)
+    > {.underline}](https://cloud.google.com/sdk/docs/install)
 
 -   Git installed
 
