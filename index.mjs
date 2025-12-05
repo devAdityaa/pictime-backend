@@ -53,6 +53,17 @@ app.use(
   })
 );
 
+// -----------------------------
+// FIX: HANDLE CORS PREFLIGHT
+// -----------------------------
+app.options("*", (req, res) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-PT-Auth");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  return res.sendStatus(200);
+});
+
+
 app.use(express.json({ limit: "25mb" }));
 
 // Log bucket status
